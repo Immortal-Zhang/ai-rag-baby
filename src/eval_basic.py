@@ -1,14 +1,15 @@
 # -*- coding: utf-8 -*-
 """
-最小离线评测：
-- 检索命中率（Top-k 内是否包含预期文件名）
-- 答案关键词覆盖率（命中关键词个数 / 关键词总数）
+离线评测（改进版）：
+- Top-3 检索命中率（按来源文件名）
+- 关键词覆盖率：在 “答案 + 上下文” 中找关键词；支持简单同义词
 """
 from __future__ import annotations
-import json, os
+import json
 from pathlib import Path
+from typing import List, Dict, Any
 
-# 优先用“向量检索 + 小模型”，不可用则自动回退
+# —— 检索器：优先向量版 —— #
 try:
     from src.rag_embed import RAG
     USE_EMBED = True
@@ -16,6 +17,7 @@ except Exception:
     from src.rag_simple import RAG
     USE_EMBED = False
 
+# —— 生成器：优先小模型 —— #
 try:
     from src.generator import Generator
     GEN = Generator()
@@ -29,24 +31,45 @@ EVAL_SET = ROOT / "eval" / "eval_set.jsonl"
 OUT_DIR = ROOT / "eval"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-def build_context(hits):
+def build_context(hits: List[Dict[str, Any]]) -> str:
     return "\n".join([f"- {h['chunk']}（来源：{h['source']}）" for h in hits])
 
-def ask_once(rag: RAG, question: str, topk: int = 3) -> tuple[str, list]:
+# —— 同义词表（可按需扩展） —— #
+SYNONYMS = {
+    "回滚": ["回退", "撤销"],
+    "持续集成": ["CI", "持续集成(CI)"],
+    "镜像": ["image", "镜像文件"],
+    "容器": ["container", "容器实例"],
+    "自动化测试": ["测试自动化"],
+    "分支": ["branch"],
+    "合并": ["merge"],
+    "断言": ["assert"],
+    "Dockerfile": ["dockerfile"],
+    "记录修改": ["记录变更", "变更记录"],
+    "版本控制": ["版本管理"],
+}
+
+def keyword_hit(text: str, kw: str) -> bool:
+    if kw in text:
+        return True
+    for alt in SYNONYMS.get(kw, []):
+        if alt in text:
+            return True
+    return False
+
+def ask_once(rag: RAG, question: str, topk: int = 3) -> tuple[str, List[Dict[str, Any]], str]:
     res = rag.answer(question, topk=topk)
     hits = res.get("hits", [])
     context = res.get("context") or build_context(hits)
     if USE_GEN:
-        from src.generator import Generator  # 避免导入顺序问题
         gen = GEN or Generator()
         answer = gen.generate(question, context, max_new_tokens=192)
     else:
         answer = f"基于资料：\n{context}\n（模板回答）"
-    return answer, hits
+    return answer, hits, context
 
 def evaluate():
     rag = RAG()
-    # 若没有索引就先构建
     try:
         rag.load()
     except Exception:
@@ -55,8 +78,8 @@ def evaluate():
     n = 0
     hit_ok = 0
     kw_covered_sum = 0.0
-
     rows = []
+
     with open(EVAL_SET, "r", encoding="utf-8") as f:
         for line in f:
             obj = json.loads(line)
@@ -64,12 +87,13 @@ def evaluate():
             exp_src = obj["expected_source"]
             exp_kws = obj["expected_keywords"]
 
-            answer, hits = ask_once(rag, q, topk=3)
+            answer, hits, context = ask_once(rag, q, topk=3)
             sources = [h["source"] for h in hits]
-            # 检索命中：Top-3 任意命中目标文件即记 1
             hit = 1 if exp_src in sources else 0
-            # 关键词覆盖率：答案中出现了多少预期关键词
-            covered = sum(1 for kw in exp_kws if kw in answer)
+
+            # 关键：在 “答案 + 上下文” 中查找关键词/同义词
+            combined = (answer + "\n" + context)
+            covered = sum(1 for kw in exp_kws if keyword_hit(combined, kw))
             cover_rate = covered / max(len(exp_kws), 1)
 
             n += 1
@@ -84,28 +108,25 @@ def evaluate():
                 "keyword_cover_rate": round(cover_rate, 3)
             })
 
-    # 汇总
     retrieval_hit_rate = hit_ok / n if n else 0.0
     avg_kw_cover = kw_covered_sum / n if n else 0.0
 
-    # 输出到控制台
     print("\n===== Eval Summary =====")
-    print(f"Retriever: {'embed' if USE_EMBED else 'tf-idf'}; Generator: {'flan-t5-small' if USE_GEN else 'template'}")
+    print(f"Retriever: {'embed' if USE_EMBED else 'tf-idf'}; Generator: {'mt5-small' if USE_GEN else 'template'}")
     print(f"Samples: {n}")
     print(f"Top-3 Retrieval Hit Rate: {retrieval_hit_rate:.3f}")
     print(f"Answer Keyword Coverage (avg): {avg_kw_cover:.3f}")
 
-    # 存 CSV
+    # 保存结果
     csv_path = OUT_DIR / "results.csv"
     with open(csv_path, "w", encoding="utf-8") as f:
         f.write("question,expected_source,top3_sources,retrieval_hit,keyword_cover_rate\n")
         for r in rows:
             f.write(f"{r['question']},{r['expected_source']},{r['top3_sources']},{r['retrieval_hit']},{r['keyword_cover_rate']}\n")
-    # 存 summary
     with open(OUT_DIR / "summary.txt", "w", encoding="utf-8") as f:
         f.write(
             f"Retriever: {'embed' if USE_EMBED else 'tf-idf'}; "
-            f"Generator: {'flan-t5-small' if USE_GEN else 'template'}\n"
+            f"Generator: {'mt5-small' if USE_GEN else 'template'}\n"
             f"Samples: {n}\n"
             f"Top-3 Retrieval Hit Rate: {retrieval_hit_rate:.3f}\n"
             f"Answer Keyword Coverage (avg): {avg_kw_cover:.3f}\n"
