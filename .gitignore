@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+.DS_Store
+.vscode/
+artifacts/
+logs/
+eval/*.csv
+eval/summary.txt
+.env

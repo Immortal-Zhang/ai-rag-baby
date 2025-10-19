@@ -1,0 +1,3 @@
+Git 是一种分布式版本控制系统。它可以记录代码的每次修改，支持创建与合并分支。
+常用命令包括：git init、git add、git commit -m、git checkout -b、git merge、git push。
+使用 Git 的好处是：多人协作不打架、出问题可回滚、每个功能可以用独立分支开发。

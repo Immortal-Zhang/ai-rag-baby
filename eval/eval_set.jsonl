@@ -1,0 +1,6 @@
+{"question":"什么是 Git？","expected_source":"01_git.txt","expected_keywords":["版本控制","分布式","分支","合并","回滚"]}
+{"question":"如何管理代码历史？","expected_source":"01_git.txt","expected_keywords":["记录修改","分支","回滚","commit"]}
+{"question":"常见的自动化测试类型有哪些？","expected_source":"02_testing.txt","expected_keywords":["单元测试","集成测试","端到端","pytest","断言"]}
+{"question":"为什么要用 Docker？","expected_source":"03_docker.txt","expected_keywords":["镜像","容器","一致运行","依赖","Dockerfile"]}
+{"question":"如何构建并运行 Docker 镜像？","expected_source":"03_docker.txt","expected_keywords":["docker build","docker run","镜像","容器"]}
+{"question":"pytest 是做什么的？","expected_source":"02_testing.txt","expected_keywords":["自动化测试","断言","单元测试","持续集成"]}
